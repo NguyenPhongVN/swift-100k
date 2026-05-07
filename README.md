@@ -85,6 +85,36 @@ struct ContentView: View {
 - `Swift100kArrayDataProvider`: ready-made provider for in-memory arrays.
 - `WindowedListPerformanceMode`: presets (`balanced`, `largeData`, `ultraLargeData`).
 
+### iOS ChatLayout Core (UIKit reused in SwiftUI)
+
+For iOS, you can use `Swift100kChatLayoutView` to reuse `ChatLayout` core (UICollectionViewLayout) inside SwiftUI.
+This gives you smoother batch updates and anchor preservation behavior similar to chat apps.
+
+```swift
+import SwiftUI
+import Swift100k
+
+struct ChatLayoutDemo: View {
+    @State private var items = (0..<100_000).map { RowItem(id: $0, title: "Row \($0)") }
+
+    var body: some View {
+        Swift100kChatLayoutView(
+            items: items,
+            keepAtBottom: false,
+            prefetchOffset: 30,
+            onPrefetchTop: {
+                // load older items if needed
+            },
+            onPrefetchBottom: {
+                // load next page if needed
+            }
+        ) { item in
+            Text(item.title)
+        }
+    }
+}
+```
+
 ## Performance Tips
 
 - Use `Swift100kArrayDataProvider` when you already have `[Item]` in memory.
