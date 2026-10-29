@@ -11,14 +11,19 @@ let package = Package(
     products: [
         .library(
             name: "Swift100k",
-            targets: ["MessageUI100k"]
+            targets: ["Swift100k"]
         ),
     ],
     targets: [
+        // Re-export target so consumers can `import Swift100k`.
+        .target(
+            name: "Swift100k",
+            dependencies: ["MessageUI100k"]
+        ),
         .binaryTarget(
             name: "MessageUI100k",
-            url: "https://github.com/NguyenPhongVN/swift-100k/releases/download/1.0.0/MessageUI100k.xcframework.zip",
-            checksum: "358a34a33ecfe3517a237219c2573fa107fda4fdbafce6d5e6cb953e8cd35c81"
+            url: "https://github.com/NguyenPhongVN/swift-100k/releases/download/1.1.0/MessageUI100k.xcframework.zip",
+            checksum: "403d476384df9004924a1378545af69cea2cbbf265b9ccb153c089c94b3afe93"
         )
     ]
 )

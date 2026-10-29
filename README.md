@@ -1,28 +1,27 @@
 # Swift100k
 
-`Swift100k` is a SwiftUI list component for very large datasets (100k to 1M+ rows) using a windowed loading strategy.
-
-It keeps only a small visible window in memory, supports loading more from top/bottom, and works with array-based data providers.
+`Swift100k` is a binary Swift Package (`.xcframework`) for iOS that renders very large message lists (100k–1M+ items) using a windowed, cell-recycling `UICollectionView` core exposed to SwiftUI.
 
 ## Requirements
 
-- Swift 6
-- iOS 17+, macOS 14+, tvOS 17+, watchOS 10+, visionOS 1+
+- iOS 17+
+- Xcode 26.4+ (Swift 6.3.1+). Built and verified with Xcode 26.6 (Swift 6.3.3). The artifact has library evolution enabled, but older Xcode versions (15/16) are not supported.
+- Swift tools 5.9+
 
-## Install with Swift Package Manager
+## Installation (Swift Package Manager)
 
-In Xcode:
+### Xcode
 
-1. Open your project.
+1. Open your project in Xcode.
 2. Go to **File > Add Package Dependencies...**
-3. Enter your repository URL.
-4. Select product `Swift100k`.
+3. Enter repository URL: `https://github.com/NguyenPhongVN/swift-100k`
+4. Select product: `Swift100k`
 
-Or in `Package.swift`:
+### Package.swift
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/NguyenPhongVN/swift-100k", branch: "main")
+    .package(url: "https://github.com/NguyenPhongVN/swift-100k", from: "1.1.0")
 ],
 targets: [
     .target(
@@ -36,101 +35,154 @@ targets: [
 
 ## Quick Start
 
-### 1) Create a data provider
-
-Conform to `Swift100kDataProvider`:
+Import with the product name — the `Swift100k` target re-exports everything from the binary module:
 
 ```swift
-import SwiftUI
 import Swift100k
+```
 
-struct RowItem: Identifiable, Sendable {
+### 1) Model
+
+```swift
+struct ChatMessage: Identifiable, Hashable, Equatable, Sendable {
     let id: Int
-    let title: String
-}
-
-struct RowProvider: Swift100kDataProvider {
-    let items: [RowItem]
+    var text: String
 }
 ```
 
-### 2) Render `Swift100kView`
+### 2) Data source
+
+`ListDataSource` tracks incremental changes for efficient updates. Always mutate an existing instance (`.apply(...)`, `prepend(...)`, `append(...)`) — replacing it with a new instance triggers a full reload and loses scroll position.
 
 ```swift
-import SwiftUI
-import Swift100k
+@State private var dataSource = ListDataSource<ChatMessage>()
 
-struct ContentView: View {
-    private let provider = RowProvider(
-        items: (0..<1_000_000).map { RowItem(id: $0, title: "Row \($0)") }
-    )
+// Efficient diff-based update:
+dataSource.apply(newMessages)
+```
+
+### 3) Render the list
+
+```swift
+struct ChatView: View {
+    @State private var dataSource = ListDataSource<ChatMessage>(items: messages)
+    @State private var scrollPosition = TiledScrollPosition(scrollsToBottomOnReplace: false)
 
     var body: some View {
         Swift100kView(
-            provider: provider,
-            initialIndex: 0,
-            performanceMode: .ultraLargeData,
-            debugEnabled: true
+            dataSource: dataSource,
+            scrollPosition: $scrollPosition
         ) { item in
-            Text(item.title)
+            MessageCell(item: item)
         }
     }
 }
+```
+
+### 4) Cell content
+
+Cells conform to `TiledCellContent`. Use `CellContext` for per-cell state that survives cell reuse (`@State` is lost when `UICollectionView` recycles a cell):
+
+```swift
+struct MessageCell: TiledCellContent {
+    typealias StateValue = Void
+
+    let item: ChatMessage
+
+    func body(context: CellContext<Void>) -> some View {
+        Text(item.text)
+    }
+}
+```
+
+### 5) Loading older/newer pages
+
+Windowed paging is built in via `.prependLoader` / `.appendLoader`:
+
+```swift
+Swift100kView(
+    dataSource: dataSource,
+    scrollPosition: $scrollPosition
+) { item in
+    MessageCell(item: item)
+}
+.prependLoader(hasOlder ? .loader(perform: {
+    await loadOlder()
+}) {
+    ProgressView()
+    .padding(.vertical, 8)
+} : nil)
+.appendLoader(hasNewer ? .loader(perform: {
+    await loadNewer()
+}) {
+    ProgressView()
+    .padding(.vertical, 8)
+} : nil)
+```
+
+### Supplementary views
+
+```swift
+.typingIndicator(.indicator(isVisible: isTyping) { TypingBubbleView() })
+.headerContent(.header { Text("Start of conversation") })
 ```
 
 ## Main APIs
 
-- `Swift100kView`: windowed large-list SwiftUI component.
-- `Swift100kDataProvider`: protocol for array-based providers.
-- `Swift100kArrayDataProvider`: ready-made provider for in-memory arrays.
-- `WindowedListPerformanceMode`: presets (`balanced`, `largeData`, `ultraLargeData`).
+- `Swift100kView`: the list view (renamed from `MessageUI100k` in 1.1.0 so the module supports library evolution).
+- `ListDataSource<Item>`: change-tracking data source (diff-based `apply`, `prepend`, `append`).
+- `TiledCellContent`: protocol for cell content, with `CellContext` for reveal offset and per-cell state (`CellStateStorage`).
+- `TiledScrollPosition` / `TiledScrollGeometry` / `ScrollViewGeometry`: scroll position binding and geometry observation.
+- `Loader`, `TypingIndicator`, `HeaderContent`: supplementary views added via modifiers.
+- `RevealConfiguration`: swipe-to-reveal configuration (`CellReveal`, `rubberBand`).
+- `withPrerender`: prerendering helper.
 
-### iOS ChatLayout Core (UIKit reused in SwiftUI)
+## Verify binary checksum (maintainers)
 
-For iOS, you can use `Swift100kChatLayoutView` to reuse `ChatLayout` core (UICollectionViewLayout) inside SwiftUI.
-This gives you smoother batch updates and anchor preservation behavior similar to chat apps.
-
-```swift
-import SwiftUI
-import Swift100k
-
-struct ChatLayoutDemo: View {
-    @State private var items = (0..<100_000).map { RowItem(id: $0, title: "Row \($0)") }
-
-    var body: some View {
-        Swift100kChatLayoutView(
-            items: items,
-            keepAtBottom: false,
-            prefetchOffset: 30,
-            onPrefetchTop: {
-                // load older items if needed
-            },
-            onPrefetchBottom: {
-                // load next page if needed
-            }
-        ) { item in
-            Text(item.title)
-        }
-    }
-}
-```
-
-## Performance Tips
-
-- Use `Swift100kArrayDataProvider` when you already have `[Item]` in memory.
-- Start with `.ultraLargeData` for 500k+ datasets.
-- Keep row views lightweight (avoid heavy view trees or expensive modifiers).
-
-## Behavior Notes
-
-- `initialIndex` controls first visible section of data.
-- Use `initialIndex: 0` to open at the first rows.
-- Top row shows `Reached top` when `startIndex == 0`.
-- Load-more buttons handle top and bottom paging explicitly.
-
-## Local Development
+When replacing or publishing a new binary artifact, compute checksum from the exact zip file you upload:
 
 ```bash
-swift build
-swift test
+swift package compute-checksum MessageUI100k.xcframework.zip
 ```
+
+Then update `checksum` in `Package.swift`.
+
+## Building the artifact (maintainers)
+
+The framework source lives in a separate project (`MessageUI100k.xcodeproj`). Build with **library evolution enabled** so consumers on compatible toolchains can import the module:
+
+```bash
+BUILD_LIBRARY_FOR_DISTRIBUTION=YES ./scripts/build_xcframework.sh
+cd build
+zip -r MessageUI100k.xcframework.zip MessageUI100k.xcframework
+swift package compute-checksum MessageUI100k.xcframework.zip
+```
+
+**Important:** do not declare a public type with the same name as the module (`MessageUI100k`). Library-evolution `.swiftinterface` files resolve `MessageUI100k.X` against the type instead of the module, and interface verification fails. In 1.1.0 the view was renamed `MessageUI100k` → `Swift100kView` for this reason.
+
+Release flow: commit + push the updated `Package.swift` (version + checksum), then `gh release create <version> MessageUI100k.xcframework.zip`.
+
+## Common issues
+
+**"compiled module was created by a different version of the compiler"**
+
+The imported artifact was built without library evolution and is locked to the exact compiler that built it. Fixed in 1.1.0; use a rebuilt artifact (built with `BUILD_LIBRARY_FOR_DISTRIBUTION=YES`) or match the Xcode version used to build it.
+
+**Checksum mismatch on resolve**
+
+1. Ensure `Package.swift` checksum matches the uploaded zip file.
+2. Do not reuse the same release asset URL after replacing file content — publish a new release instead.
+3. Clear SwiftPM/Xcode cache and resolve again.
+
+Useful cleanup commands:
+
+```bash
+rm -rf ~/Library/Caches/org.swift.swiftpm
+rm -rf ~/Library/Developer/Xcode/DerivedData
+rm -rf .build
+```
+
+In Xcode, also run:
+
+- `File > Packages > Reset Package Caches`
+- `File > Packages > Resolve Package Versions`
